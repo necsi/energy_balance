@@ -9,6 +9,25 @@ import {
   calculateFoodEfficiency
 } from './enhanced-efficiency-functions';
 
+// FIXED: Utility functions to handle dates without timezone issues
+const parseDate = (dateString) => {
+  const parts = dateString.split('-');
+  return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+};
+
+const formatDateForComparison = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const isSameOrAfter = (dateString1, dateString2) => {
+  const date1 = parseDate(dateString1);
+  const date2 = parseDate(dateString2);
+  return date1 >= date2;
+};
+
 // Local getSeverityFactor function with correct logic
 const getSeverityFactor = (severity) => {
   console.log('getSeverityFactor called with:', severity);
@@ -82,8 +101,11 @@ const calculateFoodEfficiencyDebug = (mealData, userProfile) => {
   // Step 4: Calculate meal type factor
   const mealTypeFactors = {
     'Breakfast': 1.3,
+    'Morning Snack': 0.9,
     'Lunch': 1.1,
+    'Afternoon Snack': 0.8,
     'Dinner': 0.9,
+    'Late Night Snack': 0.6,
     'Snack': 0.8
   };
   const mealTypeFactor = mealTypeFactors[mealData.mealType] || 1.0;
@@ -544,14 +566,16 @@ const [processedData, setProcessedData] = useState([]);
 useEffect(() => {
   if (!data || data.length === 0) return;
   
+  // FIXED: Use proper date comparison without timezone issues
   const today = new Date();
   const oneWeekAgo = new Date();
   oneWeekAgo.setDate(today.getDate() - 7);
+  const oneWeekAgoString = formatDateForComparison(oneWeekAgo);
   
   const lastWeekData = data.filter(meal => {
     try {
-      const mealDate = new Date(meal.date);
-      return mealDate >= oneWeekAgo;
+      // Use string comparison instead of Date objects to avoid timezone issues
+      return isSameOrAfter(meal.date, oneWeekAgoString);
     } catch (err) {
       console.warn('Error parsing date:', meal.date);
       return false;
@@ -645,12 +669,13 @@ useEffect(() => {
     .style("z-index", "10")
     .style("max-width", "300px");
   
+  // FIXED: Generate date range without timezone issues
   const allDatesInRange = [];
   const today = new Date();
   for (let i = 6; i >= 0; i--) {
     const date = new Date();
     date.setDate(today.getDate() - i);
-    const formattedDate = date.toISOString().split('T')[0];
+    const formattedDate = formatDateForComparison(date);
     allDatesInRange.push(formattedDate);
   }
   
@@ -660,7 +685,9 @@ useEffect(() => {
   const combinedData = [];
   const groupedByDate = d3.group(processedData, d => d.date);
   const sortedDates = allDatesInRange;
-  const uniqueMealTypes = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
+  
+  // UPDATED: Expanded unique meal types to include all snack categories
+  const uniqueMealTypes = ['Breakfast', 'Morning Snack', 'Lunch', 'Afternoon Snack', 'Dinner', 'Late Night Snack'];
   
   sortedDates.forEach(date => {
     const dateData = groupedByDate.get(date) || [];
@@ -717,9 +744,10 @@ useEffect(() => {
     .range([0, xOuter.bandwidth()])
     .padding(0.1);
   
+  // FIXED: Format date without timezone issues
   const formatDate = date => {
     const parts = date.split('-');
-    return `${parts[1]}/${parts[2]}`;
+    return `${parseInt(parts[1])}/${parseInt(parts[2])}`;
   };
   
   const maxCalories = d3.max(combinedData, d => d.calories) || 1000;
@@ -761,11 +789,15 @@ useEffect(() => {
     .style("fill", "#000")
     .text("Metabolic Efficiency (%)");
 
+  // UPDATED: Expanded color scheme for all meal types
   const mealColors = {
-    "Breakfast": "#FF9F1C",
-    "Lunch": "#2EC4B6",
-    "Dinner": "#E71D36",
-    "Snack": "#011627"
+    "Breakfast": "#FF9F1C",        // Orange
+    "Morning Snack": "#FFB84D",    // Light Orange
+    "Lunch": "#2EC4B6",            // Teal
+    "Afternoon Snack": "#4ECDC4",  // Light Teal
+    "Dinner": "#E71D36",           // Red
+    "Late Night Snack": "#FF6B6B" // Light Red
+        // Keep original for backward compatibility
   };
 
   const defaultColor = "#999999";
@@ -933,13 +965,14 @@ useEffect(() => {
     .style("font-size", "12px")
     .text(d => d.label);
   
+  // UPDATED: Expanded meal type legend to accommodate all snack types
   const mealTypeData = Object.entries(mealColors).map(([type, color]) => ({ type, color }));
   
   svg.selectAll(".meal-type-rect")
     .data(mealTypeData)
     .enter()
     .append("rect")
-    .attr("x", (d, i) => 400 + Math.floor(i/2) * 120)
+    .attr("x", (d, i) => 400 + Math.floor(i/2) * 130)
     .attr("y", (d, i) => legendY - 10 + (i % 2) * 20)
     .attr("width", 15)
     .attr("height", 15)
@@ -951,9 +984,9 @@ useEffect(() => {
     .data(mealTypeData)
     .enter()
     .append("text")
-    .attr("x", (d, i) => 425 + Math.floor(i/2) * 120)
+    .attr("x", (d, i) => 425 + Math.floor(i/2) * 130)
     .attr("y", (d, i) => legendY + 2 + (i % 2) * 20)
-    .style("font-size", "12px")
+    .style("font-size", "11px")
     .text(d => d.type);
 
   return () => {
@@ -990,6 +1023,7 @@ return (
         <li>Higher efficiency percentages mean more of your food energy is being utilized</li>
         <li>The red line tracks your efficiency over time across different meals</li>
         <li>Different meal types and timing can affect how efficiently your body processes food</li>
+        <li><strong>Snack Timing:</strong> Morning snacks (90%) are more efficient than late night snacks (60%)</li>
       </ul>
     </div>
   </div>
@@ -1821,7 +1855,8 @@ const getChartData = () => {
   return { macroSums, microSums, efficiencyData };
 };
 
-const today = new Date().toISOString().slice(0, 10);
+// FIXED: Use timezone-safe date comparison
+const today = formatDateForComparison(new Date());
 const analysisDate = foodLog.length > 0 ? foodLog[0].date : today;
 const todayMeals = foodLog.filter(entry => entry.date === today);
 const { macroSums, microSums, efficiencyData } = getChartData();

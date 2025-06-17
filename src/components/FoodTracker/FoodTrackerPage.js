@@ -5,17 +5,20 @@ import {
   query, 
   getDocs, 
   addDoc, 
+  deleteDoc,
+  updateDoc,
+  doc,
+  getDoc,
   Timestamp, 
   orderBy, 
-  limit, 
-  doc, 
-  getDoc
+  limit
 } from 'firebase/firestore';
 import { db } from '../../firebase-config';
 import './FoodTrackerPage.css';
 import { AnalysisTab } from './FoodTrackerAnalysis';
 
-const mealTypes = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
+// UPDATED: Expanded snack categories
+const mealTypes = ['Breakfast', 'Morning Snack', 'Lunch', 'Afternoon Snack', 'Dinner', 'Late Night Snack'];
 const TABS = ['Add Food', 'Food Journal', 'Analysis'];
 const ENTRIES_PER_PAGE = 20;
 
@@ -62,8 +65,14 @@ function FoodTrackerPage() {
   const [journalError, setJournalError] = useState('');
   const [journalPage, setJournalPage] = useState(1);
   
+  // Edit/Delete state
+  const [editingEntry, setEditingEntry] = useState(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  
   // Suggestion cache for performance
   const [suggestionCache, setSuggestionCache] = useState({});
+
 // Handle logout - Complete logout from both localStorage and Firebase Auth
 const handleLogout = async () => {
   console.log('Logout clicked - starting complete logout process');
@@ -97,6 +106,186 @@ const handleLogout = async () => {
     navigate('/login', { replace: true });
   }
 };
+
+  // Delete Confirmation Modal Component
+  const DeleteConfirmModal = ({ entryId, entryName, onConfirm, onCancel }) => (
+    <div className="modal-overlay">
+      <div className="delete-confirm-modal">
+        <h3>🗑️ Delete Food Entry</h3>
+        <p>Are you sure you want to delete this food entry?</p>
+        <div className="entry-preview">
+          <strong>{entryName}</strong>
+        </div>
+        <p className="warning-text">This action cannot be undone.</p>
+        <div className="modal-actions">
+          <button 
+            className="cancel-button" 
+            onClick={onCancel}
+            disabled={deleteLoading}
+          >
+            Cancel
+          </button>
+          <button 
+            className="delete-button" 
+            onClick={() => onConfirm(entryId)}
+            disabled={deleteLoading}
+          >
+            {deleteLoading ? 'Deleting...' : 'Delete Entry'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Handle delete entry
+  const handleDeleteEntry = async (entryId) => {
+    if (!currentUser || !entryId) return;
+    
+    setDeleteLoading(true);
+    setJournalError('');
+    
+    try {
+      await deleteDoc(doc(db, 'users', currentUser.id, 'food_journal', entryId));
+      
+      // Update local state
+      setFoodLog(prevLog => prevLog.filter(entry => entry.id !== entryId));
+      
+      setSuccess('Food entry deleted successfully!');
+      setTimeout(() => setSuccess(''), 3000);
+      
+    } catch (err) {
+      console.error('Error deleting entry:', err);
+      setJournalError(`Failed to delete entry: ${err.message}`);
+    } finally {
+      setDeleteLoading(false);
+      setDeleteConfirmId(null);
+    }
+  };
+
+  // Handle edit entry
+  const handleEditEntry = (entry) => {
+    // Pre-populate the form with entry data
+    setFields({
+      name: entry.name,
+      protein: entry.protein,
+      carbs: entry.carbs,
+      fat: entry.fat,
+      calories: entry.calories,
+      serving: entry.serving || 100,
+      micronutrients: entry.micronutrients || {},
+      longCovidBenefits: entry.longCovidBenefits || [],
+      longCovidCautions: entry.longCovidCautions || [],
+      longCovidRelevance: entry.longCovidRelevance || {},
+    });
+    
+    setMealType(entry.mealType);
+    setTime(entry.time);
+    setDate(entry.date);
+    setLongCovidAdjust(entry.longCovidAdjust || false);
+    setSearch(entry.name);
+    setEditingEntry(entry);
+    
+    // Switch to Add Food tab
+    setTab('Add Food');
+  };
+
+  // Update the handleLogFood function to handle both add and edit
+  const handleLogFood = async () => {
+    if (!currentUser || !currentUser.id) {
+      setError('Please log in to save your meals');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    
+    try {
+      if (!fields.name) {
+        throw new Error('Food name is required');
+      }
+      
+      const entryData = {
+        name: fields.name,
+        protein: parseFloat(fields.protein) || 0,
+        carbs: parseFloat(fields.carbs) || 0,
+        fat: parseFloat(fields.fat) || 0,
+        calories: parseFloat(fields.calories) || 0,
+        serving: parseFloat(fields.serving) || 100,
+        micronutrients: fields.micronutrients || {},
+        mealType,
+        time,
+        date,
+        longCovidAdjust,
+        longCovidBenefits: fields.longCovidBenefits || [],
+        longCovidCautions: fields.longCovidCautions || [],
+        longCovidRelevance: fields.longCovidRelevance || {},
+        mealId: selectedMeal?.id || null
+      };
+      
+      entryData.metabolicEfficiency = calculateMetabolicEfficiency(entryData);
+      
+      if (editingEntry) {
+        // Update existing entry
+        await updateDoc(
+          doc(db, 'users', currentUser.id, 'food_journal', editingEntry.id), 
+          {
+            ...entryData,
+            updatedAt: Timestamp.now()
+          }
+        );
+        
+        // Update local state
+        setFoodLog(prevLog => 
+          prevLog.map(entry => 
+            entry.id === editingEntry.id 
+              ? { ...entry, ...entryData, id: editingEntry.id }
+              : entry
+          )
+        );
+        
+        setSuccess('Food entry updated successfully!');
+        setEditingEntry(null);
+        
+      } else {
+        // Add new entry
+        entryData.createdAt = Timestamp.now();
+        
+        const docRef = await addDoc(
+          collection(db, 'users', currentUser.id, 'food_journal'), 
+          entryData
+        );
+        
+        // Update local state for immediate feedback
+        const newEntry = { id: docRef.id, ...entryData };
+        setFoodLog(prevLog => [newEntry, ...prevLog]);
+        
+        setSuccess('Food logged successfully!');
+      }
+      
+      // Reset form
+      setFields({});
+      setSelectedMeal(null);
+      setSearch('');
+      
+    } catch (err) {
+      console.error('Error logging food:', err);
+      setError(`Failed to ${editingEntry ? 'update' : 'log'} food: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Cancel edit mode
+  const handleCancelEdit = () => {
+    setEditingEntry(null);
+    setFields({});
+    setSelectedMeal(null);
+    setSearch('');
+    setSuccess('');
+    setError('');
+  };
+
   // Fetch user profile from Firestore
   const fetchUserProfile = async (uid) => {
     try {
@@ -573,11 +762,15 @@ const handleLogout = async () => {
       timeFactor = 0.9;
     }
     
+    // UPDATED: Expanded meal type factors
     const mealTypeFactors = {
       'Breakfast': 1.3,
+      'Morning Snack': 0.9,
       'Lunch': 1.1,
+      'Afternoon Snack': 0.8,
       'Dinner': 0.9,
-      'Snack': 0.8
+      'Late Night Snack': 0.6,
+      'Snack': 0.8  // Keep for backward compatibility
     };
     const mealTypeFactor = mealTypeFactors[mealData.mealType] || 1.0;
     
@@ -979,66 +1172,6 @@ const fetchSuggestions = useCallback(async () => {
     }
   };
 
-  // Log food to Firestore
-  const handleLogFood = async () => {
-    if (!currentUser || !currentUser.id) {
-      setError('Please log in to save your meals');
-      return;
-    }
-
-    setLoading(true);
-    setError('');
-    setSuccess('');
-    
-    try {
-      if (!fields.name) {
-        throw new Error('Food name is required');
-      }
-      
-      const entryData = {
-        name: fields.name,
-        protein: parseFloat(fields.protein) || 0,
-        carbs: parseFloat(fields.carbs) || 0,
-        fat: parseFloat(fields.fat) || 0,
-        calories: parseFloat(fields.calories) || 0,
-        serving: parseFloat(fields.serving) || 100,
-        micronutrients: fields.micronutrients || {},
-        mealType,
-        time,
-        date,
-        longCovidAdjust,
-        longCovidBenefits: fields.longCovidBenefits || [],
-        longCovidCautions: fields.longCovidCautions || [],
-        longCovidRelevance: fields.longCovidRelevance || {},
-        createdAt: Timestamp.now(),
-        mealId: selectedMeal?.id || null
-      };
-      
-      entryData.metabolicEfficiency = calculateMetabolicEfficiency(entryData);
-      
-      await addDoc(
-        collection(db, 'users', currentUser.id, 'food_journal'), 
-        entryData
-      );
-      
-      setSuccess('Food logged successfully!');
-      
-      setFields({});
-      setSelectedMeal(null);
-      setSearch('');
-      
-      if (tab === 'Food Journal') {
-        fetchFoodLog(1);
-      }
-      
-    } catch (err) {
-      console.error('Error logging food:', err);
-      setError(`Failed to log food: ${err.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   // Fetch food log function
   const fetchFoodLog = useCallback(async (page = 1) => {
     if (!currentUser || !currentUser.id) return;
@@ -1108,6 +1241,16 @@ const fetchSuggestions = useCallback(async () => {
 
   return (
     <div className="food-tracker-container">
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmId && (
+        <DeleteConfirmModal
+          entryId={deleteConfirmId}
+          entryName={foodLog.find(entry => entry.id === deleteConfirmId)?.name || 'Unknown'}
+          onConfirm={handleDeleteEntry}
+          onCancel={() => setDeleteConfirmId(null)}
+        />
+      )}
+
       <div className="tracker-header">
         <button onClick={handleBack} className="back-button">
           ← Back to Dashboard
@@ -1133,6 +1276,25 @@ const fetchSuggestions = useCallback(async () => {
       {tab === 'Add Food' && (
         <div className="food-form-section">
           <div className="food-form-left">
+            {/* Edit Mode Indicator */}
+            {editingEntry && (
+              <div className="edit-mode-banner">
+                <div className="edit-indicator">
+                  <span className="edit-icon">✏️</span>
+                  <span className="edit-text">
+                    <strong>Editing:</strong> {editingEntry.name}
+                  </span>
+                </div>
+                <button 
+                  className="cancel-edit-btn"
+                  onClick={handleCancelEdit}
+                  type="button"
+                >
+                  Cancel Edit
+                </button>
+              </div>
+            )}
+
             {/* Long COVID Checkbox */}
             <div className="form-group long-covid-checkbox-group">
               <label className="long-covid-checkbox-label">
@@ -1241,11 +1403,14 @@ const fetchSuggestions = useCallback(async () => {
 
             <div className="form-group">
               <button 
-                className="submit-button"
+                className={`submit-button ${editingEntry ? 'update-mode' : ''}`}
                 onClick={handleLogFood}
                 disabled={loading || !fields.name}
               >
-                {loading ? 'Logging...' : 'Log Food'}
+                {loading ? 
+                  (editingEntry ? 'Updating...' : 'Logging...') : 
+                  (editingEntry ? 'Update Food' : 'Log Food')
+                }
               </button>
               {success && <div className="success-message">{success}</div>}
               {error && <div className="error-message">{error}</div>}
@@ -1286,6 +1451,7 @@ const fetchSuggestions = useCallback(async () => {
           </div>
           
           {journalError && <div className="error-message">{journalError}</div>}
+          {success && <div className="success-message">{success}</div>}
           
           {logLoading && foodLog.length === 0 ? (
             <div className="loading-indicator">Loading your food journal...</div>
@@ -1301,36 +1467,98 @@ const fetchSuggestions = useCallback(async () => {
               </div>
               
               <div className="journal-table-container">
-                <table className="food-log-table">
+                <table className="food-log-table compact">
                   <thead>
                     <tr>
-                      <th>Date</th>
-                      <th>Time</th>
-                      <th>Meal Type</th>
-                      <th>Food</th>
-                      <th>Serving (g)</th>
-                      <th>Protein (g)</th>
-                      <th>Carbs (g)</th>
-                      <th>Fat (g)</th>
-                      <th>Calories</th>
-                      <th>Efficiency (%)</th>
+                      <th className="date-time-col">Date/Time</th>
+                      <th className="meal-type-col">Meal</th>
+                      <th className="food-col">Food</th>
+                      <th className="serving-col">Serving</th>
+                      <th className="macro-col">P</th>
+                      <th className="macro-col">C</th>
+                      <th className="macro-col">F</th>
+                      <th className="calories-col">Cal</th>
+                      <th className="efficiency-col">Eff%</th>
+                      <th className="actions-col">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {foodLog.map(entry => (
-                      <tr key={entry.id}>
-                        <td>{entry.date}</td>
-                        <td>{entry.time}</td>
-                        <td>{entry.mealType}</td>
-                        <td>{entry.name}</td>
-                        <td>{entry.serving || '0'}</td>
-                        <td>{typeof entry.protein === 'number' ? entry.protein.toFixed(1) : (entry.protein || '0')}</td>
-                        <td>{typeof entry.carbs === 'number' ? entry.carbs.toFixed(1) : (entry.carbs || '0')}</td>
-                        <td>{typeof entry.fat === 'number' ? entry.fat.toFixed(1) : (entry.fat || '0')}</td>
-                        <td>{entry.calories || '0'}</td>
-                        <td>{typeof entry.metabolicEfficiency === 'number' ? entry.metabolicEfficiency.toFixed(1) : 'N/A'}</td>
-                      </tr>
-                    ))}
+                    {foodLog.map(entry => {
+                      // Format date and time compactly - FIXED timezone issue
+                      const formatDateTime = (date, time) => {
+                        // Parse date string manually to avoid timezone issues
+                        const dateParts = date.split('-');
+                        //const year = parseInt(dateParts[0], 10);
+                        const month = parseInt(dateParts[1], 10);
+                        const day = parseInt(dateParts[2], 10);
+                        
+                        const shortTime = time.replace(':00', '').replace(' ', '');
+                        return `${month}/${day} ${shortTime}`;
+                      };
+                      
+                      // UPDATED: Handle all snack types for badge display
+                      const getMealBadge = (mealType) => {
+                        switch(mealType) {
+                          case 'Breakfast': return 'B';
+                          case 'Morning Snack': return 'MS';
+                          case 'Lunch': return 'L';
+                          case 'Afternoon Snack': return 'AS';
+                          case 'Dinner': return 'D';
+                          case 'Late Night Snack': return 'LN';
+                          case 'Snack': return 'S'; // Original snack for backward compatibility
+                          default: return mealType.charAt(0);
+                        }
+                      };
+                      
+                      return (
+                        <tr key={entry.id}>
+                          <td className="date-time-cell">
+                            {formatDateTime(entry.date, entry.time)}
+                          </td>
+                          <td className="meal-type-cell">
+                            <span className={`meal-badge ${(entry.mealType || 'unknown').trim().toLowerCase().replace(/\s+/g, '-')}`}>
+                              {getMealBadge(entry.mealType || 'Unknown')}
+                            </span>
+                          </td>
+                          <td className="food-cell" title={entry.name}>
+                            {entry.name.length > 20 ? `${entry.name.substring(0, 20)}...` : entry.name}
+                          </td>
+                          <td className="serving-cell">{entry.serving || '0'}g</td>
+                          <td className="macro-cell">{typeof entry.protein === 'number' ? entry.protein.toFixed(1) : (entry.protein || '0')}</td>
+                          <td className="macro-cell">{typeof entry.carbs === 'number' ? entry.carbs.toFixed(1) : (entry.carbs || '0')}</td>
+                          <td className="macro-cell">{typeof entry.fat === 'number' ? entry.fat.toFixed(1) : (entry.fat || '0')}</td>
+                          <td className="calories-cell">{entry.calories || '0'}</td>
+                          <td className="efficiency-cell">
+                            <span className={`efficiency-badge ${
+                              typeof entry.metabolicEfficiency === 'number' 
+                                ? entry.metabolicEfficiency >= 80 ? 'high' : 
+                                  entry.metabolicEfficiency >= 60 ? 'medium' : 'low'
+                                : 'unknown'
+                            }`}>
+                              {typeof entry.metabolicEfficiency === 'number' ? entry.metabolicEfficiency.toFixed(0) : 'N/A'}
+                            </span>
+                          </td>
+                          <td className="actions-cell">
+                            <div className="action-buttons compact">
+                              <button
+                                className="edit-btn compact"
+                                onClick={() => handleEditEntry(entry)}
+                                title="Edit entry"
+                              >
+                                ✏️
+                              </button>
+                              <button
+                                className="delete-btn compact"
+                                onClick={() => setDeleteConfirmId(entry.id)}
+                                title="Delete entry"
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1362,4 +1590,3 @@ const fetchSuggestions = useCallback(async () => {
 }
 
 export default FoodTrackerPage;
-
