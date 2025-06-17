@@ -1,0 +1,35 @@
+.divider-component {
+  display: flex;
+  align-items: center;
+  text-align: center;
+
+  color: #9ca3af;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.divider-component::before,
+.divider-component::after {
+  content: "";
+  flex: 1;
+  border-bottom: 1px solid #4b5563;
+}
+
+.divider-component:not(:empty) {
+  --gap: 1.25rem;
+}
+
+.divider-component:not(:empty)::before {
+  margin-right: var(--gap);
+}
+
+.divider-component:not(:empty)::after {
+  margin-left: var(--gap);
+}
+
+@media (prefers-color-scheme: dark) {
+  .divider-component::before,
+  .divider-component::after {
+    border-bottom: 1px solid #4b5563;
+  }
+}

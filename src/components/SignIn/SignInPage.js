@@ -3,6 +3,7 @@ import { useNavigate, Link, useLocation } from "react-router-dom";
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { auth, db } from "../../firebase-config";
+import Divider from '../Divider';
 import "./SignInPage.css";
 
 function SignInPage() {
@@ -294,7 +295,7 @@ function SignInPage() {
           </button>
         </form>
         
-        <div className="divider">or</div>
+        <Divider>or</Divider>
         
         <div className="signup-link">
           Don't have an account? <Link to="/register">Sign up here</Link>
