@@ -154,35 +154,6 @@
   100% { transform: rotate(360deg); }
 }
 
-/* Divider */
-.divider {
-  text-align: center;
-  color: #6b7280;
-  font-size: 0.875rem;
-  font-weight: 400;
-  margin: 24px 0;
-  position: relative;
-}
-
-.divider::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: #e5e7eb;
-  z-index: 1;
-}
-
-.divider::after {
-  content: 'or';
-  background: white;
-  padding: 0 16px;
-  position: relative;
-  z-index: 2;
-}
-
 /* Sign up link */
 .signup-link {
   text-align: center;
